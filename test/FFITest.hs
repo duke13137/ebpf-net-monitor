@@ -9,7 +9,7 @@ import Foreign
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=), assertBool)
 import Test.Tasty.QuickCheck (testProperty, Arbitrary(..))
-import Test.QuickCheck (choose, elements)
+import Test.QuickCheck (Gen, choose, elements, ioProperty)
 
 tests :: TestTree
 tests = testGroup "FFI"
@@ -78,7 +78,7 @@ storableTests = testGroup "Storable NetEvent"
         pad1 @?= 0
 
   , testProperty "arbitrary roundtrip" $ \(evt :: NetEvent) ->
-      unsafeLocalState $ alloca $ \ptr -> do
+      ioProperty $ alloca $ \ptr -> do
         poke ptr evt
         got <- peek ptr
         pure (got == evt)
@@ -101,7 +101,7 @@ instance Arbitrary NetEvent where
     <*> arbitraryProtocol
     <*> arbitraryDirection
 
-arbitraryProtocol :: Test.QuickCheck.Gen Protocol
+arbitraryProtocol :: Gen Protocol
 arbitraryProtocol = do
   tag <- choose (0 :: Int, 3)
   case tag of
@@ -110,7 +110,7 @@ arbitraryProtocol = do
     2 -> pure ICMP
     _ -> OtherProto <$> arbitrary
 
-arbitraryDirection :: Test.QuickCheck.Gen Direction
+arbitraryDirection :: Gen Direction
 arbitraryDirection = elements [Ingress, Egress]
 
 -- -------------------------------------------------------------------

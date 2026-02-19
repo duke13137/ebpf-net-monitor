@@ -46,7 +46,7 @@ eventStream arena timeoutMs = S.repeatM pollAndReset
 
 -- | Fold batches into a running aggregation map.
 aggregateStream :: Stream IO [NetEvent] -> Stream IO (Map AggKey AggRow)
-aggregateStream = S.scan (F.foldl' step Map.empty)
+aggregateStream = S.postscan (F.foldl' step Map.empty)
   where
     step acc evts = foldl updateOne acc evts
 

@@ -6,7 +6,7 @@ module TUI
 import FFI (ipToString, Direction(..), Protocol(..))
 import Stream (AggRow(..), AggKey)
 
-import Brick
+import Brick hiding (Direction)
 import Brick.BChan (BChan)
 import Brick.Widgets.Table (renderTable, table)
 import Brick.Widgets.Border (borderWithLabel)
@@ -16,7 +16,7 @@ import qualified Graphics.Vty.CrossPlatform as VtyCross
 import Data.List (sortBy)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Ord (Down(..), comparing)
+import Data.Ord (comparing)
 
 -- | Custom event pushed from the Streamly pipeline via BChan.
 newtype AppEvent = NewSnapshot (Map AggKey AggRow)
