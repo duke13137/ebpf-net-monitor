@@ -44,7 +44,7 @@ jobs:
         run: cabal update
 
       - name: Build
-        run: cabal build all
+        run: cabal build exe:ebpf-net-monitor test:tests
 
       - name: Test
-        run: cabal test all --test-show-details=direct
+        run: cabal test tests --test-show-details=direct
