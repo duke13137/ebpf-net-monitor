@@ -167,6 +167,10 @@ monitorPoll arena timeoutMs = alloca $ \countPtr -> do
     then pure []
     else peekArray (fromIntegral count) evtPtr
 
+-- | Detach TC hooks and close BPF object. Safe to call multiple times.
+monitorCleanup :: IO ()
+monitorCleanup = c_monitorCleanup
+
 -- | Reset arena bump pointer to start. Invalidates all prior event pointers.
 arenaReset :: Ptr Arena -> IO ()
 arenaReset = c_arenaReset
