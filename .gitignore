@@ -1,0 +1,8 @@
+dist-newstyle/
+bpf/vmlinux.h
+bpf/*.bpf.o
+test/cbits/test_monitor
+*.o
+*.hi
+*~
+.DS_Store

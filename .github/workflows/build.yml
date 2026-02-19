@@ -1,0 +1,52 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  c-tests:
+    name: C tests (clang-21)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-21 and libbpf-dev
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install -y clang-21 libbpf-dev libelf-dev zlib1g-dev
+
+      - name: Build C tests
+        run: make -C test/cbits CC=clang-21
+
+      - name: Run C tests
+        run: make -C test/cbits test
+
+  haskell:
+    name: Haskell build (GHC 9.10.3)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libbpf-dev libelf-dev zlib1g-dev
+
+      - uses: haskell-actions/setup@v2
+        with:
+          ghc-version: '9.10.3'
+          cabal-version: '3.12'
+
+      - name: cabal update
+        run: cabal update
+
+      - name: Build
+        run: cabal build all
+
+      - name: Test
+        run: cabal test all --test-show-details=direct

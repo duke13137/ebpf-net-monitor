@@ -1,0 +1,18 @@
+CLANG   ?= clang
+ARCH    := $(shell uname -m | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/')
+BPF_DIR := bpf
+OUT     := $(BPF_DIR)/monitor.bpf.o
+
+CFLAGS := -g -O2 -target bpf -D__TARGET_ARCH_$(ARCH) \
+          -Wall -Werror \
+          -I$(BPF_DIR) -Icbits
+
+.PHONY: all clean
+
+all: $(OUT)
+
+$(OUT): $(BPF_DIR)/monitor.bpf.c $(BPF_DIR)/vmlinux.h cbits/monitor.h
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
+clean:
+	rm -f $(OUT)
