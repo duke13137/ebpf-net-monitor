@@ -62,7 +62,7 @@ executable ebpf-net-monitor
   include-dirs:     cbits
   includes:         monitor.h arena.h
   extra-libraries:  bpf elf z
-  cc-options:       -DOOM_COMMIT -Wall -Wextra -O2
+  cc-options:       -Wall -Wextra -Wno-unused-function -O2
   ghc-options:      -Wall -O2 -threaded -rtsopts "-with-rtsopts=-N"
 
 test-suite tests
@@ -97,5 +97,5 @@ test-suite tests
   include-dirs:     cbits
   includes:         monitor.h arena.h
   -- No extra-libraries for test suite: monitor_init/poll are stubbed on non-Linux
-  cc-options:       -DOOM_COMMIT -Wall -Wextra -O2
+  cc-options:       -Wall -Wextra -Wno-unused-function -O2
   ghc-options:      -Wall -O2 -threaded
