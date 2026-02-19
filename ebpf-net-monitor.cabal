@@ -96,6 +96,6 @@ test-suite tests
   c-sources:        cbits/monitor.c
   include-dirs:     cbits
   includes:         monitor.h arena.h
-  -- No extra-libraries for test suite: monitor_init/poll are stubbed on non-Linux
-  cc-options:       -Wall -Wextra -Wno-unused-function -Wno-error -O2
+  extra-libraries:  bpf elf z
+  cc-options:       -Wall -Wextra -Wno-unused-function -O2
   ghc-options:      -W -O2 -threaded
