@@ -6,7 +6,7 @@ module TUI
 import FFI (ipToString, Direction(..), Protocol(..))
 import Stream (AggRow(..), AggKey)
 
-import Brick hiding (Direction)
+import Brick hiding (Direction(..))
 import Brick.BChan (BChan)
 import Brick.Widgets.Table (renderTable, table)
 import Brick.Widgets.Border (borderWithLabel)
@@ -16,7 +16,7 @@ import qualified Graphics.Vty.CrossPlatform as VtyCross
 import Data.List (sortBy)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Ord (comparing)
+import Data.Ord (Down(..), comparing)
 
 -- | Custom event pushed from the Streamly pipeline via BChan.
 newtype AppEvent = NewSnapshot (Map AggKey AggRow)
@@ -33,8 +33,8 @@ app = App
   , appChooseCursor = neverShowCursor
   , appHandleEvent  = handleEvent
   , appStartEvent   = pure ()
-  , appAttrMap      = const $ attrMap
-      [ (attrName "header", Vty.withStyle Vty.currentAttr Vty.bold) ]
+  , appAttrMap      = const $ attrMap Vty.defAttr
+      [ (attrName "header", Vty.withStyle Vty.defAttr Vty.bold) ]
   }
 
 drawUI :: AppState -> [Widget Name]
