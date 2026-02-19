@@ -20,7 +20,6 @@ module FFI
   ) where
 
 import Control.Exception (bracket, throwIO)
-import Data.Bits (shiftR, (.&.))
 import Data.List (intercalate)
 import Data.Word
 import Foreign

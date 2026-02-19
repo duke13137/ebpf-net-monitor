@@ -33,7 +33,10 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libbpf-dev libelf-dev zlib1g-dev
+          sudo apt-get install -y clang llvm-15 libbpf-dev libelf-dev zlib1g-dev
+          # GHC 9.10 needs LLVM 13-15; ubuntu-24.04 ships LLVM 18 as default
+          sudo ln -sf /usr/bin/opt-15 /usr/local/bin/opt
+          sudo ln -sf /usr/bin/llc-15 /usr/local/bin/llc
 
       - uses: haskell-actions/setup@v2
         with:
@@ -47,4 +50,4 @@ jobs:
         run: cabal build exe:ebpf-net-monitor test:tests
 
       - name: Test
-        run: cabal test tests --test-show-details=direct
+        run: cabal test test:tests --test-show-details=direct

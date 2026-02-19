@@ -1,2 +1,8 @@
 packages: .
 with-compiler: ghc-9.10
+
+-- LLVM backend for codegen; clang for C compilation and linking.
+-- -optl-no-pie: clang defaults to PIE on Ubuntu 24.04 but GHC's cabal-store
+-- dependencies are compiled without -fPIC, causing R_X86_64_32S errors.
+package ebpf-net-monitor
+  ghc-options: -fllvm -pgmc clang -pgml clang -optl-no-pie
