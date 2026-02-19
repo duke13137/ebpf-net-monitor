@@ -3,7 +3,6 @@ module StreamTest (tests) where
 import FFI
 import Stream
 
-import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Word
 import Test.Tasty (TestTree, testGroup)
@@ -51,7 +50,7 @@ updateAggTests = testGroup "updateAgg"
       let evt = mkEvent localhost localhost ICMP Ingress 64
           m   = updateAgg Map.empty [evt]
       Map.size m @?= 1
-      let row = head (Map.elems m)
+      let [row] = Map.elems m
       aggPktCount row  @?= 1
       aggByteCount row @?= 64
 
@@ -60,7 +59,7 @@ updateAggTests = testGroup "updateAgg"
           evt2 = mkEvent localhost localhost TCP Ingress 200
           m    = updateAgg Map.empty [evt1, evt2]
       Map.size m @?= 1
-      let row = head (Map.elems m)
+      let [row] = Map.elems m
       aggPktCount row  @?= 2
       aggByteCount row @?= 300
 
@@ -90,7 +89,7 @@ updateAggTests = testGroup "updateAgg"
           m1   = updateAgg Map.empty [evt1]
           m2   = updateAgg m1 [evt2]
       Map.size m2 @?= 1
-      let row = head (Map.elems m2)
+      let [row] = Map.elems m2
       aggPktCount row  @?= 2
       aggByteCount row @?= 300
 
@@ -99,7 +98,7 @@ updateAggTests = testGroup "updateAgg"
                   | i <- [1..1000 :: Int] ]
           m    = updateAgg Map.empty evts
       Map.size m @?= 1
-      let row = head (Map.elems m)
+      let [row] = Map.elems m
       aggPktCount row  @?= 1000
       -- sum 1..1000 = 500500
       aggByteCount row @?= 500500

@@ -10,6 +10,7 @@ import Control.Exception (bracket_)
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.IO (hPutStrLn, stderr)
+import qualified Streamly.Data.Fold as F
 import qualified Streamly.Data.Stream as S
 
 main :: IO ()
@@ -31,7 +32,7 @@ main = do
       -- Streamly pipeline on a background thread:
       --   poll ring_buffer -> aggregate per-flow -> push snapshot to BChan
       _tid <- forkIO $
-        S.mapM_ (writeBChan chan . NewSnapshot) $
+        S.fold (F.drainMapM (writeBChan chan . NewSnapshot)) $
           aggregateStream (eventStream arena pollTimeoutMs)
 
       -- brick needs the main thread for terminal signal handling
