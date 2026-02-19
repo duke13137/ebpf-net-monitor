@@ -9,7 +9,7 @@ import Foreign
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=), assertBool)
 import Test.Tasty.QuickCheck (testProperty, Arbitrary(..))
-import Test.QuickCheck (Gen, choose, elements, ioProperty)
+import Test.QuickCheck (Gen, choose, elements, ioProperty, suchThat)
 
 tests :: TestTree
 tests = testGroup "FFI"
@@ -108,7 +108,7 @@ arbitraryProtocol = do
     0 -> pure TCP
     1 -> pure UDP
     2 -> pure ICMP
-    _ -> OtherProto <$> arbitrary
+    _ -> OtherProto <$> (choose (0, 255) `suchThat` (\n -> n /= 1 && n /= 6 && n /= 17))
 
 arbitraryDirection :: Gen Direction
 arbitraryDirection = elements [Ingress, Egress]
