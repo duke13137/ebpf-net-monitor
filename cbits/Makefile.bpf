@@ -4,7 +4,7 @@ BPF_DIR := bpf
 OUT     := $(BPF_DIR)/monitor.bpf.o
 
 CFLAGS := -g -O2 -target bpf -D__TARGET_ARCH_$(ARCH) \
-          -Wall -Werror \
+          -Wall -Werror -Wno-error=missing-declarations \
           -I$(BPF_DIR) -Icbits
 
 .PHONY: all clean

@@ -5,11 +5,12 @@ synopsis:      eBPF network packet monitor with Haskell TUI
 license:       MIT
 build-type:    Simple
 
--- Type-check only target: no C deps, no linking.
--- Usage: cabal build lib:typecheck
+-- Keep the legacy typecheck component out of the default build so plain
+-- `cabal build` only builds linkable components.
 library typecheck
   visibility:       private
-  default-language: Haskell2010
+  buildable:        False
+  default-language: GHC2024
   hs-source-dirs:   src test
   exposed-modules:
       FFI
@@ -35,10 +36,10 @@ library typecheck
     , tasty-quickcheck    >= 0.10
     , QuickCheck          >= 2.14
 
-  ghc-options: -Wall -fno-code -fwrite-interface
+  ghc-options: -Wall
 
 executable ebpf-net-monitor
-  default-language: Haskell2010
+  default-language: GHC2024
   hs-source-dirs:   src
   main-is:          Main.hs
   other-modules:
@@ -67,7 +68,7 @@ executable ebpf-net-monitor
 
 test-suite tests
   type:             exitcode-stdio-1.0
-  default-language: Haskell2010
+  default-language: GHC2024
   hs-source-dirs:   test src
   main-is:          Main.hs
   other-modules:

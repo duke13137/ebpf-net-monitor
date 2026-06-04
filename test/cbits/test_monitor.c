@@ -20,8 +20,8 @@
 /* net_event struct layout                                             */
 /* ================================================================== */
 
-UTEST(net_event, size_is_24) {
-    ASSERT_EQ(24u, sizeof(struct net_event));
+UTEST(net_event, size_is_32) {
+    ASSERT_EQ(32u, sizeof(struct net_event));
 }
 
 UTEST(net_event, offset_timestamp) {
@@ -36,34 +36,42 @@ UTEST(net_event, offset_dst_ip) {
     ASSERT_EQ(12u, offsetof(struct net_event, dst_ip));
 }
 
+UTEST(net_event, offset_src_port) {
+    ASSERT_EQ(16u, offsetof(struct net_event, src_port));
+}
+
+UTEST(net_event, offset_dst_port) {
+    ASSERT_EQ(18u, offsetof(struct net_event, dst_port));
+}
+
 UTEST(net_event, offset_pkt_len) {
-    ASSERT_EQ(16u, offsetof(struct net_event, pkt_len));
+    ASSERT_EQ(20u, offsetof(struct net_event, pkt_len));
 }
 
 UTEST(net_event, offset_protocol) {
-    ASSERT_EQ(20u, offsetof(struct net_event, protocol));
+    ASSERT_EQ(24u, offsetof(struct net_event, protocol));
 }
 
 UTEST(net_event, offset_direction) {
-    ASSERT_EQ(21u, offsetof(struct net_event, direction));
+    ASSERT_EQ(25u, offsetof(struct net_event, direction));
 }
 
 UTEST(net_event, offset_pad) {
-    ASSERT_EQ(22u, offsetof(struct net_event, _pad));
+    ASSERT_EQ(26u, offsetof(struct net_event, _pad));
 }
 
-UTEST(net_event, no_implicit_padding) {
-    /* Verify that our explicit _pad[2] accounts for all padding.
-       If the compiler added implicit padding, sizeof would exceed
-       the sum of field sizes. */
-    size_t fields = sizeof(uint64_t)  /* timestamp_ns */
-                  + sizeof(uint32_t)  /* src_ip */
-                  + sizeof(uint32_t)  /* dst_ip */
-                  + sizeof(uint32_t)  /* pkt_len */
-                  + sizeof(uint8_t)   /* protocol */
-                  + sizeof(uint8_t)   /* direction */
-                  + 2;                /* _pad[2] */
-    ASSERT_EQ(fields, sizeof(struct net_event));
+UTEST(net_event, trailing_alignment_padding) {
+    size_t explicit_fields = sizeof(uint64_t)  /* timestamp_ns */
+                           + sizeof(uint32_t)  /* src_ip */
+                           + sizeof(uint32_t)  /* dst_ip */
+                           + sizeof(uint16_t)  /* src_port */
+                           + sizeof(uint16_t)  /* dst_port */
+                           + sizeof(uint32_t)  /* pkt_len */
+                           + sizeof(uint8_t)   /* protocol */
+                           + sizeof(uint8_t)   /* direction */
+                           + 2;                /* _pad[2] */
+    ASSERT_EQ(28u, explicit_fields);
+    ASSERT_EQ(32u, sizeof(struct net_event));
 }
 
 /* ================================================================== */
@@ -124,6 +132,8 @@ UTEST(arena_batch, sequential_events_are_contiguous) {
         .timestamp_ns = 42,
         .src_ip       = 0x0100007F,
         .dst_ip       = 0x0200007F,
+        .src_port     = 443,
+        .dst_port     = 12345,
         .pkt_len      = 128,
         .protocol     = 6,  /* TCP */
         .direction    = 0,  /* ingress */

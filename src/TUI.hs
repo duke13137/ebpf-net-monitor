@@ -3,29 +3,30 @@ module TUI
   , runTUI
   ) where
 
-import FFI (ipToString, Direction(..), Protocol(..))
-import Stream (AggRow(..), AggKey)
+import FFI (Direction (..), Port, Protocol (..), ipToString, portToHost)
+import Stream (AggKey, AggRow (..))
 
-import Brick hiding (Direction(..))
+import Brick hiding (Direction (..))
 import Brick.BChan (BChan)
-import Brick.Widgets.Table (renderTable, table)
 import Brick.Widgets.Border (borderWithLabel)
-import qualified Graphics.Vty as Vty
-import qualified Graphics.Vty.CrossPlatform as VtyCross
+import Brick.Widgets.Table (renderTable, table)
+import Graphics.Vty qualified as Vty
+import Graphics.Vty.CrossPlatform qualified as VtyCross
 
 import Data.List (sortBy)
 import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
-import Data.Ord (Down(..), comparing)
+import Data.Map.Strict qualified as Map
+import Data.Ord (Down (..), comparing)
+
+
+type AppState = Map AggKey AggRow
 
 -- | Custom event pushed from the Streamly pipeline via BChan.
-newtype AppEvent = NewSnapshot (Map AggKey AggRow)
+newtype AppEvent = NewSnapshot AppState
 
 -- | Widget name type. Single viewport, no focus ring needed.
 data Name = MainViewport
   deriving (Eq, Ord, Show)
-
-type AppState = Map AggKey AggRow
 
 app :: App AppState AppEvent Name
 app = App
@@ -44,13 +45,15 @@ drawUI st =
   ]
   where
     rows     = sortBy (comparing (Down . aggByteCount)) (Map.elems st)
-    header   = map str ["Src IP", "Dst IP", "Proto", "Dir", "Packets", "Bytes"]
+    header   = map str ["Src IP", "Src Port", "Dst IP", "Dst Port", "Proto", "Dir", "Packets", "Bytes"]
     dataRows = map rowWidgets (take 50 rows)
     tbl      = table (header : dataRows)
 
     rowWidgets r =
       [ str (ipToString (aggSrcIp r))
+      , str (showPort (aggSrcPort r))
       , str (ipToString (aggDstIp r))
+      , str (showPort (aggDstPort r))
       , str (showProto (aggProtocol r))
       , str (showDir (aggDirection r))
       , str (show (aggPktCount r))
@@ -67,11 +70,14 @@ showDir :: Direction -> String
 showDir Ingress = "IN"
 showDir Egress  = "OUT"
 
+showPort :: Port -> String
+showPort = show . portToHost
+
 handleEvent :: BrickEvent Name AppEvent -> EventM Name AppState ()
 handleEvent (VtyEvent (Vty.EvKey (Vty.KChar 'q') [])) = halt
-handleEvent (VtyEvent (Vty.EvKey Vty.KEsc []))         = halt
-handleEvent (AppEvent (NewSnapshot snap))               = put snap
-handleEvent _                                           = pure ()
+handleEvent (VtyEvent (Vty.EvKey Vty.KEsc []))        = halt
+handleEvent (AppEvent (NewSnapshot snap))             = put snap
+handleEvent _                                         = pure ()
 
 -- | Run the brick TUI. Blocks until the user quits ('q' or Esc).
 -- Reads 'AppEvent's from the 'BChan' (fed by the Streamly pipeline).

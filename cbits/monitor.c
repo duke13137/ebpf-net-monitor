@@ -43,6 +43,19 @@ static unsigned int ifindex;
 static Arena *poll_arena;
 static int    poll_count;
 
+#ifdef __linux__
+static void destroy_clsact_qdisc(unsigned int index) {
+    if (!index)
+        return;
+
+    LIBBPF_OPTS(bpf_tc_hook, hook,
+        .ifindex      = index,
+        .attach_point = BPF_TC_INGRESS | BPF_TC_EGRESS,
+    );
+    bpf_tc_hook_destroy(&hook);  /* best-effort cleanup; ignore ENOENT */
+}
+#endif
+
 /* ------------------------------------------------------------------ */
 /* Ring buffer callback                                                */
 /* ------------------------------------------------------------------ */
@@ -72,9 +85,15 @@ int monitor_init(const char *ifname) {
     fprintf(stderr, "monitor_init: eBPF requires Linux\n");
     return -ENOSYS;
 #else
+    int err = 0;
+
     ifindex = if_nametoindex(ifname);
     if (!ifindex)
         return -errno;
+
+    ingress_fd = 0;
+    egress_fd = 0;
+    destroy_clsact_qdisc(ifindex);  /* clean up stale hooks from prior runs */
 
     obj = bpf_object__open_file("bpf/monitor.bpf.o", NULL);
     if (libbpf_get_error(obj)) {
@@ -82,56 +101,84 @@ int monitor_init(const char *ifname) {
         return -ENOENT;
     }
 
-    if (bpf_object__load(obj))
-        return -EINVAL;
+    if (bpf_object__load(obj)) {
+        err = -EINVAL;
+        goto fail;
+    }
 
     /* --- Attach TC ingress --- */
     LIBBPF_OPTS(bpf_tc_hook, hook_ingress,
         .ifindex      = ifindex,
         .attach_point = BPF_TC_INGRESS,
     );
-    bpf_tc_hook_create(&hook_ingress);  /* may already exist */
+    if (bpf_tc_hook_create(&hook_ingress) &&
+        errno != EEXIST) {
+        err = -errno;
+        goto fail;
+    }
 
     struct bpf_program *prog_in =
         bpf_object__find_program_by_name(obj, "monitor_ingress");
-    if (!prog_in) return -ENOENT;
+    if (!prog_in) {
+        err = -ENOENT;
+        goto fail;
+    }
     ingress_fd = bpf_program__fd(prog_in);
 
     LIBBPF_OPTS(bpf_tc_opts, opts_ingress,
         .prog_fd = ingress_fd,
     );
-    if (bpf_tc_attach(&hook_ingress, &opts_ingress))
-        return -EINVAL;
+    if (bpf_tc_attach(&hook_ingress, &opts_ingress)) {
+        err = -EINVAL;
+        goto fail;
+    }
 
     /* --- Attach TC egress --- */
     LIBBPF_OPTS(bpf_tc_hook, hook_egress,
         .ifindex      = ifindex,
         .attach_point = BPF_TC_EGRESS,
     );
-    bpf_tc_hook_create(&hook_egress);
+    if (bpf_tc_hook_create(&hook_egress) &&
+        errno != EEXIST) {
+        err = -errno;
+        goto fail;
+    }
 
     struct bpf_program *prog_eg =
         bpf_object__find_program_by_name(obj, "monitor_egress");
-    if (!prog_eg) return -ENOENT;
+    if (!prog_eg) {
+        err = -ENOENT;
+        goto fail;
+    }
     egress_fd = bpf_program__fd(prog_eg);
 
     LIBBPF_OPTS(bpf_tc_opts, opts_egress,
         .prog_fd = egress_fd,
     );
-    if (bpf_tc_attach(&hook_egress, &opts_egress))
-        return -EINVAL;
+    if (bpf_tc_attach(&hook_egress, &opts_egress)) {
+        err = -EINVAL;
+        goto fail;
+    }
 
     /* --- Open ring buffer --- */
     struct bpf_map *map = bpf_object__find_map_by_name(obj, "events");
-    if (!map) return -ENOENT;
+    if (!map) {
+        err = -ENOENT;
+        goto fail;
+    }
 
     rb = ring_buffer__new(bpf_map__fd(map), event_handler, NULL, NULL);
     if (libbpf_get_error(rb)) {
         rb = NULL;
-        return -ENOMEM;
+        err = -ENOMEM;
+        goto fail;
     }
 
     return 0;
+
+fail:
+    monitor_cleanup();
+    return err;
 #endif
 }
 
@@ -162,34 +209,11 @@ void monitor_cleanup(void) {
         rb = NULL;
     }
 
-    if (ifindex) {
-        /* Detach ingress */
-        LIBBPF_OPTS(bpf_tc_hook, hook_in,
-            .ifindex      = ifindex,
-            .attach_point = BPF_TC_INGRESS,
-        );
-        LIBBPF_OPTS(bpf_tc_opts, opts_in,
-            .prog_fd = ingress_fd,
-        );
-        bpf_tc_detach(&hook_in, &opts_in);
+    destroy_clsact_qdisc(ifindex);
 
-        /* Detach egress */
-        LIBBPF_OPTS(bpf_tc_hook, hook_eg,
-            .ifindex      = ifindex,
-            .attach_point = BPF_TC_EGRESS,
-        );
-        LIBBPF_OPTS(bpf_tc_opts, opts_eg,
-            .prog_fd = egress_fd,
-        );
-        bpf_tc_detach(&hook_eg, &opts_eg);
-
-        /* Destroy clsact qdisc */
-        LIBBPF_OPTS(bpf_tc_hook, hook_destroy,
-            .ifindex      = ifindex,
-            .attach_point = BPF_TC_INGRESS | BPF_TC_EGRESS,
-        );
-        bpf_tc_hook_destroy(&hook_destroy);
-    }
+    ingress_fd = 0;
+    egress_fd = 0;
+    ifindex = 0;
 
     if (obj) {
         bpf_object__close(obj);

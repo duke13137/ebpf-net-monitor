@@ -22,37 +22,46 @@ struct {
 } events SEC(".maps");
 
 static __always_inline int handle_packet(struct __sk_buff *skb, __u8 dir) {
-    void *data     = (void *)(long)skb->data;
-    void *data_end = (void *)(long)skb->data_end;
+    struct iphdr ip;
+    struct {
+        __be16 source;
+        __be16 dest;
+    } ports = {};
 
-    /* Ethernet header bounds check (verifier requirement) */
-    struct ethhdr *eth = data;
-    if ((void *)(eth + 1) > data_end)
+    if (bpf_ntohs(skb->protocol) != ETH_P_IP)
         return TC_ACT_OK;
 
-    if (bpf_ntohs(eth->h_proto) != ETH_P_IP)
+    if (bpf_skb_load_bytes_relative(skb, 0, &ip, sizeof(ip), BPF_HDR_START_NET) < 0)
         return TC_ACT_OK;
 
-    /* IP header bounds check (verifier requirement) */
-    struct iphdr *ip = (void *)(eth + 1);
-    if ((void *)(ip + 1) > data_end)
+    if (ip.version != 4)
         return TC_ACT_OK;
+
+    __u32 ip_hdr_len = (__u32)ip.ihl * 4;
+    if (ip_hdr_len < sizeof(ip))
+        return TC_ACT_OK;
+
+    if (ip.protocol == IPPROTO_TCP || ip.protocol == IPPROTO_UDP) {
+        if (bpf_skb_load_bytes_relative(skb, ip_hdr_len, &ports, sizeof(ports), BPF_HDR_START_NET) < 0)
+            return TC_ACT_OK;
+    }
 
     struct net_event *evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
     if (!evt)
         return TC_ACT_OK;  /* ring full -- drop event, not packet */
 
     evt->timestamp_ns = bpf_ktime_get_ns();
-    evt->src_ip       = ip->saddr;
-    evt->dst_ip       = ip->daddr;
+    evt->src_ip       = ip.saddr;
+    evt->dst_ip       = ip.daddr;
+    evt->src_port     = ports.source;
+    evt->dst_port     = ports.dest;
     evt->pkt_len      = skb->len;
-    evt->protocol     = ip->protocol;
+    evt->protocol     = ip.protocol;
     evt->direction    = dir;
-    evt->_pad[0]      = 0;
-    evt->_pad[1]      = 0;
 
     bpf_ringbuf_submit(evt, 0);
     return TC_ACT_OK;
+
 }
 
 SEC("tc/ingress")

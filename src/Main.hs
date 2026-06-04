@@ -23,7 +23,7 @@ main = do
       exitFailure
 
   let arenaSize     = 4 * 1024 * 1024  -- 4 MB virtual reservation
-      pollTimeoutMs = 100               -- 100ms poll timeout
+      pollTimeoutMs = 10                -- 10ms poll timeout (100ms was unnecessarily high)
 
   withArena arenaSize $ \arena ->
     bracket_ (monitorInit ifname) monitorCleanup $ do

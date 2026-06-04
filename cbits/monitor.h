@@ -1,23 +1,36 @@
 #ifndef MONITOR_H
 #define MONITOR_H
 
+#ifdef __BPF__
+typedef __u64 monitor_u64;
+typedef __u32 monitor_u32;
+typedef __u16 monitor_u16;
+typedef __u8  monitor_u8;
+#else
 #include <stdint.h>
+typedef uint64_t monitor_u64;
+typedef uint32_t monitor_u32;
+typedef uint16_t monitor_u16;
+typedef uint8_t  monitor_u8;
+#endif
 
 /**
  * Network event captured by the eBPF TC program.
  * Layout must match Haskell Storable instance (FFI.hs) exactly.
  */
 struct net_event {
-    uint64_t timestamp_ns;  /* bpf_ktime_get_ns() */
-    uint32_t src_ip;        /* network byte order */
-    uint32_t dst_ip;        /* network byte order */
-    uint32_t pkt_len;       /* total packet length */
-    uint8_t  protocol;      /* IPPROTO_TCP=6, UDP=17, ICMP=1 */
-    uint8_t  direction;     /* 0=ingress, 1=egress */
-    uint8_t  _pad[2];       /* explicit padding to 24 bytes */
+    monitor_u64 timestamp_ns;  /* bpf_ktime_get_ns() */
+    monitor_u32 src_ip;        /* network byte order */
+    monitor_u32 dst_ip;        /* network byte order */
+    monitor_u16 src_port;      /* network byte order */
+    monitor_u16 dst_port;      /* network byte order */
+    monitor_u32 pkt_len;       /* total packet length */
+    monitor_u8  protocol;      /* IPPROTO_TCP=6, UDP=17, ICMP=1 */
+    monitor_u8  direction;     /* 0=ingress, 1=egress */
+    monitor_u8  _pad[2];       /* explicit padding before final 8-byte alignment */
 };
 
-_Static_assert(sizeof(struct net_event) == 24, "net_event must be 24 bytes");
+_Static_assert(sizeof(struct net_event) == 32, "net_event must be 32 bytes");
 
 /* Direction constants */
 #define DIR_INGRESS 0
@@ -48,7 +61,7 @@ void monitor_cleanup(void);
  * FFI wrappers for arena lifecycle.
  * Haskell can't receive C structs by value, so these heap-allocate the Arena.
  */
-Arena *arena_init_ffi(void *buf, uint64_t size);
+Arena *arena_init_ffi(void *buf, monitor_u64 size);
 void   arena_release_ffi(Arena *arena);
 void   arena_reset_ffi(Arena *arena);
 
@@ -56,6 +69,6 @@ void   arena_reset_ffi(Arena *arena);
  * Return the number of bytes currently used in the arena.
  * Useful for testing and diagnostics.
  */
-uint64_t arena_used_ffi(Arena *arena);
+monitor_u64 arena_used_ffi(Arena *arena);
 
 #endif

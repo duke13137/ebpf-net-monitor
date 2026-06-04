@@ -1,6 +1,7 @@
+{-# LANGUAGE BangPatterns #-}
 {-# OPTIONS_GHC -Wno-deprecations #-}  -- S.scan is deprecated in favor of S.scanl (Scanl type)
 module Stream
-  ( AggKey
+  ( AggKey(..)
   , AggRow(..)
   , aggRowKey
   , eventStream
@@ -8,23 +9,32 @@ module Stream
   , updateAgg
   ) where
 
+import Control.Monad (when)
 import FFI
 
 import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
-import Data.Word (Word32)
+import Data.Map.Strict qualified as Map
 import Foreign (Ptr)
+import Streamly.Data.Fold qualified as F
 import Streamly.Data.Stream (Stream)
-import qualified Streamly.Data.Fold as F
-import qualified Streamly.Data.Stream as S
+import Streamly.Data.Stream qualified as S
 
--- | Aggregation key: (src_ip, dst_ip, protocol, direction).
-type AggKey = (Word32, Word32, Protocol, Direction)
+-- | Aggregation key for one flow.
+data AggKey = AggKey
+  { keySrcIp     :: {-# UNPACK #-} !IPv4
+  , keyDstIp     :: {-# UNPACK #-} !IPv4
+  , keySrcPort   :: {-# UNPACK #-} !Port
+  , keyDstPort   :: {-# UNPACK #-} !Port
+  , keyProtocol  :: !Protocol
+  , keyDirection :: !Direction
+  } deriving (Show, Eq, Ord)
 
 -- | Accumulated counters for one flow.
 data AggRow = AggRow
-  { aggSrcIp     :: {-# UNPACK #-} !Word32
-  , aggDstIp     :: {-# UNPACK #-} !Word32
+  { aggSrcIp     :: {-# UNPACK #-} !IPv4
+  , aggDstIp     :: {-# UNPACK #-} !IPv4
+  , aggSrcPort   :: {-# UNPACK #-} !Port
+  , aggDstPort   :: {-# UNPACK #-} !Port
   , aggProtocol  :: !Protocol
   , aggDirection :: !Direction
   , aggPktCount  :: {-# UNPACK #-} !Int
@@ -32,60 +42,101 @@ data AggRow = AggRow
   } deriving (Show, Eq)
 
 aggRowKey :: AggRow -> AggKey
-aggRowKey r = (aggSrcIp r, aggDstIp r, aggProtocol r, aggDirection r)
+aggRowKey r = AggKey
+  { keySrcIp     = aggSrcIp r
+  , keyDstIp     = aggDstIp r
+  , keySrcPort   = aggSrcPort r
+  , keyDstPort   = aggDstPort r
+  , keyProtocol  = aggProtocol r
+  , keyDirection = aggDirection r
+  }
 
--- | Infinite stream of event batches from the ring buffer.
--- Each element is one poll cycle's worth of 'NetEvent's.
--- The arena is reset after each batch so pointers don't escape.
-eventStream :: Ptr Arena -> Int -> Stream IO [NetEvent]
-eventStream arena timeoutMs = S.repeatM pollAndReset
+-- | Infinite stream of raw event batches from the ring buffer.
+--
+-- The arena is reset immediately before the next poll, so each yielded batch
+-- remains valid for the duration of downstream processing of that element.
+eventStream :: Ptr Arena -> Int -> Stream IO RawBatch
+eventStream arena timeoutMs = S.unfoldrM step False
   where
-    pollAndReset = do
-      evts <- monitorPoll arena timeoutMs
-      arenaReset arena
-      pure evts
+    step shouldReset = do
+      when shouldReset (arenaReset arena)
+      batch <- monitorPoll arena timeoutMs
+      pure (Just (batch, True))
 
 -- | Fold batches into a running aggregation map.
-aggregateStream :: Stream IO [NetEvent] -> Stream IO (Map AggKey AggRow)
-aggregateStream = S.scan (F.foldl' step Map.empty)
-  where
-    step acc evts = foldl updateOne acc evts
-
-    updateOne m evt =
-      let key = (evSrcIp evt, evDstIp evt, evProtocol evt, evDirection evt)
-          row = AggRow
-            { aggSrcIp     = evSrcIp evt
-            , aggDstIp     = evDstIp evt
-            , aggProtocol  = evProtocol evt
-            , aggDirection = evDirection evt
-            , aggPktCount  = 1
-            , aggByteCount = fromIntegral (evPktLen evt)
-            }
-      in Map.insertWith mergeRow key row m
-
-    mergeRow new old = old
-      { aggPktCount  = aggPktCount old + aggPktCount new
-      , aggByteCount = aggByteCount old + aggByteCount new
-      }
+aggregateStream :: Stream IO RawBatch -> Stream IO (Map AggKey AggRow)
+aggregateStream = S.scan (F.foldl' updateAggRaw Map.empty)
 
 -- | Pure aggregation step: fold a batch of events into an existing map.
 -- Exported for testing without IO.
 updateAgg :: Map AggKey AggRow -> [NetEvent] -> Map AggKey AggRow
-updateAgg = foldl go
-  where
-    go m evt =
-      let key = (evSrcIp evt, evDstIp evt, evProtocol evt, evDirection evt)
-          row = AggRow
-            { aggSrcIp     = evSrcIp evt
-            , aggDstIp     = evDstIp evt
-            , aggProtocol  = evProtocol evt
-            , aggDirection = evDirection evt
-            , aggPktCount  = 1
-            , aggByteCount = fromIntegral (evPktLen evt)
-            }
-      in Map.insertWith merge key row m
+updateAgg = foldl' updateAggEvent
 
-    merge new old = old
-      { aggPktCount  = aggPktCount old + aggPktCount new
-      , aggByteCount = aggByteCount old + aggByteCount new
+updateAggRaw :: Map AggKey AggRow -> RawBatch -> Map AggKey AggRow
+updateAggRaw !m batch = go 0 m
+  where
+    n = rawCount batch
+
+    go !i !acc
+      | i >= n = acc
+      | otherwise =
+          go (i + 1) $
+            insertAgg
+              (rawSrcIp batch i)
+              (rawDstIp batch i)
+              (rawSrcPort batch i)
+              (rawDstPort batch i)
+              (rawProtocol batch i)
+              (rawDirection batch i)
+              (rawPktLen batch i)
+              acc
+
+updateAggEvent :: Map AggKey AggRow -> NetEvent -> Map AggKey AggRow
+updateAggEvent !m evt =
+  insertAgg
+    (evSrcIp evt)
+    (evDstIp evt)
+    (evSrcPort evt)
+    (evDstPort evt)
+    (evProtocol evt)
+    (evDirection evt)
+    (evPktLen evt)
+    m
+
+insertAgg
+  :: IPv4
+  -> IPv4
+  -> Port
+  -> Port
+  -> Protocol
+  -> Direction
+  -> PacketBytes
+  -> Map AggKey AggRow
+  -> Map AggKey AggRow
+insertAgg srcIp dstIp srcPort dstPort proto dir pktLen =
+  Map.insertWith mergeRow key row
+  where
+    key = AggKey
+      { keySrcIp     = srcIp
+      , keyDstIp     = dstIp
+      , keySrcPort   = srcPort
+      , keyDstPort   = dstPort
+      , keyProtocol  = proto
+      , keyDirection = dir
       }
+    row = AggRow
+      { aggSrcIp     = srcIp
+      , aggDstIp     = dstIp
+      , aggSrcPort   = srcPort
+      , aggDstPort   = dstPort
+      , aggProtocol  = proto
+      , aggDirection = dir
+      , aggPktCount  = 1
+      , aggByteCount = fromIntegral (unPacketBytes pktLen)
+      }
+
+mergeRow :: AggRow -> AggRow -> AggRow
+mergeRow new old = old
+  { aggPktCount  = aggPktCount old + aggPktCount new
+  , aggByteCount = aggByteCount old + aggByteCount new
+  }
