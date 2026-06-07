@@ -6,3 +6,8 @@ test/cbits/test_monitor
 *.hi
 *~
 .DS_Store
+.hackage.tags
+.haskell.hoo
+ghcid.txt
+tags
+tags.mtime

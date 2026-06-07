@@ -1,0 +1,10 @@
+If:
+  PathMatch: .*\.h
+CompileFlags:
+  Add: [-xc-header, -std=gnu11]
+
+---
+If:
+  PathMatch: .*\.c
+CompileFlags:
+  Add: [-std=gnu11]
