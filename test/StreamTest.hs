@@ -14,9 +14,9 @@ tests = testGroup "Stream"
   , aggRowKeyTests
   ]
 
-mkEvent :: IPv4 -> IPv4 -> Port -> Port -> Protocol -> Direction -> PacketBytes -> NetEvent
-mkEvent src dst srcPort dstPort proto dir plen = NetEvent
-  { evTimestampNs = TimestampNs 0
+mkEventAt :: TimestampNs -> IPv4 -> IPv4 -> Port -> Port -> Protocol -> Direction -> PacketBytes -> NetEvent
+mkEventAt ts src dst srcPort dstPort proto dir plen = NetEvent
+  { evTimestampNs = ts
   , evSrcIp       = src
   , evDstIp       = dst
   , evSrcPort     = srcPort
@@ -25,6 +25,9 @@ mkEvent src dst srcPort dstPort proto dir plen = NetEvent
   , evProtocol    = proto
   , evDirection   = dir
   }
+
+mkEvent :: IPv4 -> IPv4 -> Port -> Port -> Protocol -> Direction -> PacketBytes -> NetEvent
+mkEvent = mkEventAt (TimestampNs 0)
 
 ip :: Word8 -> Word8 -> Word8 -> Word8 -> IPv4
 ip a b c d = IPv4 $
@@ -83,12 +86,13 @@ updateAggTests = testGroup "updateAgg"
       let evt1 = mkEvent localhost localhost (HostPort 443) (HostPort 12345) TCP  Ingress (PacketBytes 50)
           evt2 = mkEvent localhost localhost (HostPort 443) (HostPort 12345) UDP  Ingress (PacketBytes 50)
           evt3 = mkEvent localhost localhost (HostPort 0)   (HostPort 0)     ICMP Ingress (PacketBytes 50)
-          m    = updateAgg Map.empty [evt1, evt2, evt3]
-      Map.size m @?= 3
+          evt4 = mkEvent localhost localhost (HostPort 0)   (HostPort 0)     IGMP Ingress (PacketBytes 50)
+          m    = updateAgg Map.empty [evt1, evt2, evt3, evt4]
+      Map.size m @?= 4
 
   , testCase "non-TCP/UDP events aggregate under port 0" $ do
-      let evt1 = mkEvent localhost localhost (HostPort 0) (HostPort 0) ICMP Ingress (PacketBytes 10)
-          evt2 = mkEvent localhost localhost (HostPort 0) (HostPort 0) ICMP Ingress (PacketBytes 20)
+      let evt1 = mkEvent localhost localhost (HostPort 0) (HostPort 0) IGMP Ingress (PacketBytes 10)
+          evt2 = mkEvent localhost localhost (HostPort 0) (HostPort 0) IGMP Ingress (PacketBytes 20)
           m    = updateAgg Map.empty [evt1, evt2]
       Map.size m @?= 1
       let [row] = Map.elems m
@@ -115,6 +119,19 @@ updateAggTests = testGroup "updateAgg"
       let [row] = Map.elems m
       aggPktCount row  @?= 1000
       aggByteCount row @?= 500500
+
+  , testCase "rolling window prunes stale flows" $ do
+      let windowNs = 10
+          oldEvt   = mkEventAt (TimestampNs 0)  localhost localhost (HostPort 443) (HostPort 12345) TCP Ingress (PacketBytes 100)
+          newEvt   = mkEventAt (TimestampNs 20) localhost localhost (HostPort 0)   (HostPort 0)     IGMP Ingress (PacketBytes 50)
+          m1       = updateAggWindow (TimestampNs 0)  windowNs Map.empty [oldEvt]
+          m2       = updateAggWindow (TimestampNs 20) windowNs m1        [newEvt]
+      Map.size m2 @?= 1
+      let [row] = Map.elems m2
+      aggProtocol row @?= IGMP
+      aggPktCount row @?= 1
+      aggByteCount row @?= 50
+      aggLastSeen row @?= TimestampNs 20
   ]
 
 aggRowKeyTests :: TestTree
@@ -129,6 +146,7 @@ aggRowKeyTests = testGroup "aggRowKey"
             , aggDirection = Egress
             , aggPktCount  = 42
             , aggByteCount = 12345
+            , aggLastSeen  = TimestampNs 99
             }
       aggRowKey row @?= AggKey
         { keySrcIp     = localhost
@@ -139,8 +157,8 @@ aggRowKeyTests = testGroup "aggRowKey"
         , keyDirection = Egress
         }
 
-  , testCase "counters do not affect key" $ do
-      let row1 = AggRow localhost localhost (HostPort 443) (HostPort 12345) TCP Ingress 1 100
-          row2 = AggRow localhost localhost (HostPort 443) (HostPort 12345) TCP Ingress 999 999999
+  , testCase "counters and timestamps do not affect key" $ do
+      let row1 = AggRow localhost localhost (HostPort 443) (HostPort 12345) TCP Ingress 1 100 (TimestampNs 1)
+          row2 = AggRow localhost localhost (HostPort 443) (HostPort 12345) TCP Ingress 999 999999 (TimestampNs 999)
       aggRowKey row1 @?= aggRowKey row2
   ]

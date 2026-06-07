@@ -100,7 +100,7 @@ pattern HostPort p <- (portToHost -> p)
 data Direction = Ingress | Egress
   deriving (Show, Eq, Ord, Enum, Bounded)
 
-data Protocol = TCP | UDP | ICMP | OtherProto !Word8
+data Protocol = TCP | UDP | ICMP | IGMP | OtherProto !Word8
   deriving (Show, Eq, Ord)
 
 data NetEvent = NetEvent
@@ -165,6 +165,7 @@ instance Storable NetEvent where
 {-# INLINE toProtocol #-}
 toProtocol :: Word8 -> Protocol
 toProtocol 1  = ICMP
+toProtocol 2  = IGMP
 toProtocol 6  = TCP
 toProtocol 17 = UDP
 toProtocol n  = OtherProto n
@@ -172,6 +173,7 @@ toProtocol n  = OtherProto n
 {-# INLINE fromProtocol #-}
 fromProtocol :: Protocol -> Word8
 fromProtocol ICMP           = 1
+fromProtocol IGMP           = 2
 fromProtocol TCP            = 6
 fromProtocol UDP            = 17
 fromProtocol (OtherProto n) = n

@@ -64,6 +64,7 @@ showProto :: Protocol -> String
 showProto TCP            = "TCP"
 showProto UDP            = "UDP"
 showProto ICMP           = "ICMP"
+showProto IGMP           = "IGMP"
 showProto (OtherProto n) = show n
 
 showDir :: Direction -> String

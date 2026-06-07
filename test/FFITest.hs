@@ -151,12 +151,13 @@ arbitraryPort = HostPort <$> arbitrary
 
 arbitraryProtocol :: Gen Protocol
 arbitraryProtocol = do
-  tag <- choose (0 :: Int, 3)
+  tag <- choose (0 :: Int, 4)
   case tag of
     0 -> pure TCP
     1 -> pure UDP
     2 -> pure ICMP
-    _ -> OtherProto <$> (choose (0, 255) `suchThat` (\n -> n /= 1 && n /= 6 && n /= 17))
+    3 -> pure IGMP
+    _ -> OtherProto <$> (choose (0, 255) `suchThat` (\n -> n /= 1 && n /= 2 && n /= 6 && n /= 17))
 
 arbitraryDirection :: Gen Direction
 arbitraryDirection = elements [Ingress, Egress]
@@ -185,10 +186,12 @@ ipTests = testGroup "ipToString"
 
 protocolTests :: TestTree
 protocolTests = testGroup "Protocol"
-  [ testCase "TCP roundtrip"  $ toProtocol (fromProtocol TCP)  @?= TCP
-  , testCase "UDP roundtrip"  $ toProtocol (fromProtocol UDP)  @?= UDP
-  , testCase "ICMP roundtrip" $ toProtocol (fromProtocol ICMP) @?= ICMP
-  , testCase "OtherProto 47"  $ toProtocol 47 @?= OtherProto 47
+  [ testCase "TCP roundtrip"   $ toProtocol (fromProtocol TCP)   @?= TCP
+  , testCase "UDP roundtrip"   $ toProtocol (fromProtocol UDP)   @?= UDP
+  , testCase "ICMP roundtrip"  $ toProtocol (fromProtocol ICMP)  @?= ICMP
+  , testCase "IGMP roundtrip"  $ toProtocol (fromProtocol IGMP)  @?= IGMP
+  , testCase "toProtocol 2"    $ toProtocol 2 @?= IGMP
+  , testCase "OtherProto 47"   $ toProtocol 47 @?= OtherProto 47
   , testCase "OtherProto roundtrip" $
       toProtocol (fromProtocol (OtherProto 132)) @?= OtherProto 132
   ]
