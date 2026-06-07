@@ -7,6 +7,7 @@ module Stream
   , eventStream
   , aggregateStream
   , updateAgg
+  , updateAggWindow
   ) where
 
 import Control.Monad (when)
@@ -14,7 +15,9 @@ import FFI
 
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Word (Word64)
 import Foreign (Ptr)
+import GHC.Clock (getMonotonicTimeNSec)
 import Streamly.Data.Fold qualified as F
 import Streamly.Data.Stream (Stream)
 import Streamly.Data.Stream qualified as S
@@ -39,6 +42,7 @@ data AggRow = AggRow
   , aggDirection :: !Direction
   , aggPktCount  :: {-# UNPACK #-} !Int
   , aggByteCount :: {-# UNPACK #-} !Int
+  , aggLastSeen  :: {-# UNPACK #-} !TimestampNs
   } deriving (Show, Eq)
 
 aggRowKey :: AggRow -> AggKey
@@ -50,6 +54,11 @@ aggRowKey r = AggKey
   , keyProtocol  = aggProtocol r
   , keyDirection = aggDirection r
   }
+
+rollingWindowNs :: Word64
+rollingWindowNs = 10 * 1000 * 1000 * 1000
+
+data TimedBatch = TimedBatch !Word64 !RawBatch
 
 -- | Infinite stream of raw event batches from the ring buffer.
 --
@@ -63,18 +72,38 @@ eventStream arena timeoutMs = S.unfoldrM step False
       batch <- monitorPoll arena timeoutMs
       pure (Just (batch, True))
 
--- | Fold batches into a running aggregation map.
+-- | Fold batches into a rolling per-flow view.
 aggregateStream :: Stream IO RawBatch -> Stream IO (Map AggKey AggRow)
-aggregateStream = S.scan (F.foldl' updateAggRaw Map.empty)
+aggregateStream = S.scan (F.foldl' updateAggTimed Map.empty) . S.mapM stampBatch
 
 -- | Pure aggregation step: fold a batch of events into an existing map.
 -- Exported for testing without IO.
 updateAgg :: Map AggKey AggRow -> [NetEvent] -> Map AggKey AggRow
 updateAgg = foldl' updateAggEvent
 
-updateAggRaw :: Map AggKey AggRow -> RawBatch -> Map AggKey AggRow
-updateAggRaw !m batch = go 0 m
+-- | Pure rolling-window aggregation step for testing the dashboard policy.
+updateAggWindow :: TimestampNs -> Word64 -> Map AggKey AggRow -> [NetEvent] -> Map AggKey AggRow
+updateAggWindow (TimestampNs now) windowNs m evts =
+  pruneAgg now windowNs (foldl' (updateAggEventAt now) m evts)
+
+stampBatch :: RawBatch -> IO TimedBatch
+stampBatch batch = TimedBatch <$> getMonotonicTimeNSec <*> pure batch
+
+updateAggTimed :: Map AggKey AggRow -> TimedBatch -> Map AggKey AggRow
+updateAggTimed !m (TimedBatch now batch) =
+  pruneAgg now rollingWindowNs (updateAggRawAt now m batch)
+
+pruneAgg :: Word64 -> Word64 -> Map AggKey AggRow -> Map AggKey AggRow
+pruneAgg now windowNs =
+  Map.filter (\row ->
+    let seen = unTimestampNs (aggLastSeen row)
+    in seen >= now || now - seen <= windowNs
+  )
+
+updateAggRawAt :: Word64 -> Map AggKey AggRow -> RawBatch -> Map AggKey AggRow
+updateAggRawAt now !m batch = go 0 m
   where
+    seen = TimestampNs now
     n = rawCount batch
 
     go !i !acc
@@ -82,6 +111,7 @@ updateAggRaw !m batch = go 0 m
       | otherwise =
           go (i + 1) $
             insertAgg
+              seen
               (rawSrcIp batch i)
               (rawDstIp batch i)
               (rawSrcPort batch i)
@@ -94,6 +124,20 @@ updateAggRaw !m batch = go 0 m
 updateAggEvent :: Map AggKey AggRow -> NetEvent -> Map AggKey AggRow
 updateAggEvent !m evt =
   insertAgg
+    (evTimestampNs evt)
+    (evSrcIp evt)
+    (evDstIp evt)
+    (evSrcPort evt)
+    (evDstPort evt)
+    (evProtocol evt)
+    (evDirection evt)
+    (evPktLen evt)
+    m
+
+updateAggEventAt :: Word64 -> Map AggKey AggRow -> NetEvent -> Map AggKey AggRow
+updateAggEventAt now !m evt =
+  insertAgg
+    (TimestampNs now)
     (evSrcIp evt)
     (evDstIp evt)
     (evSrcPort evt)
@@ -104,7 +148,8 @@ updateAggEvent !m evt =
     m
 
 insertAgg
-  :: IPv4
+  :: TimestampNs
+  -> IPv4
   -> IPv4
   -> Port
   -> Port
@@ -113,7 +158,7 @@ insertAgg
   -> PacketBytes
   -> Map AggKey AggRow
   -> Map AggKey AggRow
-insertAgg srcIp dstIp srcPort dstPort proto dir pktLen =
+insertAgg seenNs srcIp dstIp srcPort dstPort proto dir pktLen =
   Map.insertWith mergeRow key row
   where
     key = AggKey
@@ -133,10 +178,12 @@ insertAgg srcIp dstIp srcPort dstPort proto dir pktLen =
       , aggDirection = dir
       , aggPktCount  = 1
       , aggByteCount = fromIntegral (unPacketBytes pktLen)
+      , aggLastSeen  = seenNs
       }
 
 mergeRow :: AggRow -> AggRow -> AggRow
 mergeRow new old = old
   { aggPktCount  = aggPktCount old + aggPktCount new
   , aggByteCount = aggByteCount old + aggByteCount new
+  , aggLastSeen  = max (aggLastSeen old) (aggLastSeen new)
   }
