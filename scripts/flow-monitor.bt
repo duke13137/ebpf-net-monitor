@@ -1,0 +1,87 @@
+#!/usr/bin/bpftrace
+
+/*
+ * Flow monitor — compares flows with ebpf-net-monitor TUI.
+ * Captures TCP/UDP flow keys (IP:port pairs + direction) via kprobes.
+ * Run: sudo bpftrace scripts/flow-monitor.bt
+ * Let run for 10-15 seconds, then Ctrl-C to see summary.
+ */
+
+BEGIN
+{
+  printf("=== Flow Monitor (bpftrace) ===\n");
+  printf("Run ebpf-net-monitor in another pane. Let both run 10-15s.\n");
+  printf("Then Ctrl-C here to compare flow keys.\n");
+  printf("Keys: SrcIP SrcPort DstIP DstPort Proto Dir Pkts\n");
+  printf("================================================\n");
+}
+
+/*
+ * TCP egress — tcp_sendmsg
+ * arg0: struct sock *sk, arg2: size_t len
+ */
+kprobe:tcp_sendmsg
+{
+  $sk = (struct sock *)arg0;
+  $skc = $sk->__sk_common;
+  @tcp_out[ntop($skc.skc_rcv_saddr), $skc.skc_num,
+           ntop($skc.skc_daddr), bswap($skc.skc_dport)] = count();
+}
+
+/*
+ * TCP ingress — tcp_rcv_established
+ * arg0: struct sock *sk
+ */
+kprobe:tcp_rcv_established
+{
+  $sk = (struct sock *)arg0;
+  $skc = $sk->__sk_common;
+  @tcp_in[ntop($skc.skc_daddr), bswap($skc.skc_dport),
+          ntop($skc.skc_rcv_saddr), $skc.skc_num] = count();
+}
+
+/*
+ * UDP egress — udp_sendmsg
+ * arg0: struct sock *sk, arg2: size_t len
+ */
+kprobe:udp_sendmsg
+{
+  $sk = (struct sock *)arg0;
+  $skc = $sk->__sk_common;
+  @udp_out[ntop($skc.skc_rcv_saddr), $skc.skc_num,
+            ntop($skc.skc_daddr), bswap($skc.skc_dport)] = count();
+}
+
+/*
+ * UDP ingress — __udp4_lib_rcv (some kernels pass skb as arg0)
+ * The function signature is: int __udp4_lib_rcv(struct sk_buff *skb, ...)
+ * We trace udp_queue_rcv_skb instead for reliable sock access.
+ */
+kprobe:udp_queue_rcv_skb
+{
+  $sk = (struct sock *)arg0;
+  if ($sk != 0) {
+    $skc = $sk->__sk_common;
+    @udp_in[ntop($skc.skc_daddr), bswap($skc.skc_dport),
+            ntop($skc.skc_rcv_saddr), $skc.skc_num] = count();
+  }
+}
+
+END
+{
+  printf("\n========================================\n");
+  printf("TCP Egress (OUT):\n");
+  printf("%-16s %-6s %-16s %-6s %s\n", "SrcIP", "Port", "DstIP", "Port", "Pkts");
+  print(@tcp_out);
+  printf("\nTCP Ingress (IN):\n");
+  printf("%-16s %-6s %-16s %-6s %s\n", "SrcIP", "Port", "DstIP", "Port", "Pkts");
+  print(@tcp_in);
+  printf("\nUDP Egress (OUT):\n");
+  print(@udp_out);
+  printf("\nUDP Ingress (IN):\n");
+  print(@udp_in);
+  printf("\n========================================\n");
+  printf("Compare with TUI column values (IP:port pairs).\n");
+  printf("NOTE: bpftrace count = app data calls, TUI count = wire packets.\n");
+  printf("Flow keys (IP:port combos) should match.\n");
+}

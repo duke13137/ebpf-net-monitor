@@ -5,8 +5,8 @@ import Stream (eventStream, aggregateStream)
 import TUI (AppEvent(..), runTUI)
 
 import Brick.BChan (newBChan, writeBChan)
-import Control.Concurrent (forkIO)
-import Control.Exception (bracket_)
+import Control.Concurrent (forkIO, killThread)
+import Control.Exception (bracket, bracket_)
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.IO (hPutStrLn, stderr)
@@ -31,9 +31,11 @@ main = do
 
       -- Streamly pipeline on a background thread:
       --   poll ring_buffer -> aggregate per-flow -> push snapshot to BChan
-      _tid <- forkIO $
-        S.fold (F.drainMapM (writeBChan chan . NewSnapshot)) $
-          aggregateStream (eventStream arena pollTimeoutMs)
-
-      -- brick needs the main thread for terminal signal handling
-      runTUI chan
+      bracket
+        (forkIO $
+          S.fold (F.drainMapM (writeBChan chan . NewSnapshot)) $
+            aggregateStream (eventStream arena pollTimeoutMs))
+        killThread
+        (\_ ->
+          -- brick needs the main thread for terminal signal handling
+          runTUI chan)
